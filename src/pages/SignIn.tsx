@@ -23,35 +23,49 @@ export default function SignIn({ onLoginSuccess }: SignInProps) {
 
         try {
             // 1. Attempt Admin Login (Appwrite Auth)
-            try {
-                // Clear any existing stale session first
-                try {
-                    await account.deleteSession('current');
-                } catch (e) {
-                    // Ignore - no session to delete
-                }
+            // Fully dynamic - any Appwrite Auth account can sign in with their email
+            // Also supports username shortcut for @spadesecurityservices.com accounts
+            const authAttempts: string[] = [];
+            const trimmedIdentifier = identifier.trim();
+            const isEmail = trimmedIdentifier.includes('@');
 
-                // Handle "admin" shortcut
-                let authIdentifier = identifier.trim();
-
-                if (authIdentifier.toLowerCase() === 'admin') {
-                    // Hardcoded mapping for the main admin account as requested
-                    authIdentifier = 'john@spadesecurityservices.com';
-                }
-
-                // Appwrite handles non-emails gracefully enough, but we use the mapped one if needed.
-                await account.createEmailPasswordSession(authIdentifier, password);
-                // If successful
-                onLoginSuccess('admin');
-                return;
-            } catch (authError: any) {
-                // Check if it's a rate limit error
-                if (authError?.code === 429 || authError?.message?.includes('429') || authError?.message?.includes('Too Many')) {
-                    throw new Error('Too many login attempts. Please wait 5-10 minutes before trying again.');
-                }
-                // Continue to try Client login if Auth fails
-                // console.log("Not an admin or wrong password");
+            if (isEmail) {
+                // If it's an email, try it directly (works for ANY email domain)
+                authAttempts.push(trimmedIdentifier);
+            } else {
+                // If not an email, try common patterns:
+                // 1. First try with company domain (most common)
+                authAttempts.push(`${trimmedIdentifier.toLowerCase()}@spadesecurityservices.com`);
+                // 2. Try as-is in case it's somehow valid
+                authAttempts.push(trimmedIdentifier);
             }
+
+            for (const authEmail of authAttempts) {
+                try {
+                    // Clear any existing stale session first
+                    try {
+                        await account.deleteSession('current');
+                    } catch (e) {
+                        // Ignore - no session to delete
+                    }
+
+                    console.log('Attempting admin login with:', authEmail);
+                    await account.createEmailPasswordSession(authEmail, password);
+                    // If successful
+                    onLoginSuccess('admin');
+                    return;
+                } catch (authError: any) {
+                    // Check if it's a rate limit error
+                    if (authError?.code === 429 || authError?.message?.includes('429') || authError?.message?.includes('Too Many')) {
+                        throw new Error('Too many login attempts. Please wait 5-10 minutes before trying again.');
+                    }
+                    // Try next attempt
+                    console.log(`Auth attempt with ${authEmail} failed, trying next...`);
+                }
+            }
+
+            // If all admin attempts failed, continue to client login
+            console.log("All admin auth attempts failed, trying client login...");
 
             // 2. Attempt Client Login (Database)
             // Search by clientId OR name
