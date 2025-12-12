@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '../components/ui/Card';
 import { Users, Star, TrendingUp, Shield, Activity, Bell } from 'lucide-react';
-import { databases, DB_ID, COLLECTIONS } from '../lib/appwrite';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { databases, DB_ID, COLLECTIONS, account } from '../lib/appwrite';
+import { Query } from 'appwrite';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import GuardsList from '../components/admin/GuardsList';
 import ClientsList from '../components/admin/ClientsList';
 import GuardProfile from '../components/admin/GuardProfile';
@@ -10,24 +11,39 @@ import GuardProfile from '../components/admin/GuardProfile';
 export default function AdminDashboard() {
     const [currentView, setCurrentView] = useState<'overview' | 'guards' | 'clients' | 'guard_profile'>('overview');
     const [selectedGuard, setSelectedGuard] = useState<{ id: string; name: string } | null>(null);
+    const [userProfile, setUserProfile] = useState({ name: 'Operations Manager', initials: 'OM' });
 
+    useEffect(() => {
+        const fetchUser = async () => {
+            try {
+                const user = await account.get();
+                if (user.name) {
+                    const initials = user.name
+                        .split(' ')
+                        .map((n: string) => n[0])
+                        .join('')
+                        .toUpperCase()
+                        .slice(0, 2);
+                    setUserProfile({ name: user.name, initials: initials || 'OM' });
+                }
+            } catch (e) {
+                console.error("Failed to fetch user profile", e);
+            }
+        };
+        fetchUser();
+    }, []);
+
+    // ... existing stats state ...
     const [stats, setStats] = useState({
         totalGuards: 0,
         totalClients: 0,
         avgScore: 0,
-        activeAlerts: 3 // Mocked for now or logic to be added
+        activeAlerts: 0 // Mocked for now or logic to be added
     });
-    const [loading, setLoading] = useState(true);
+    // Graph Data State
+    const [graphData, setGraphData] = useState<any[]>([]);
 
-    // Mock Data for Graph (Row 2)
-    const mockGraphData = [
-        { name: 'Jan', guards: 40, clients: 24 },
-        { name: 'Feb', guards: 45, clients: 25 },
-        { name: 'Mar', guards: 48, clients: 28 },
-        { name: 'Apr', guards: 52, clients: 30 },
-        { name: 'May', guards: 55, clients: 32 },
-        { name: 'Jun', guards: 58, clients: 35 },
-    ];
+    const [loading, setLoading] = useState(true);
 
     // Mock Data for Top Guards (Row 3)
     const [topGuards, setTopGuards] = useState<any[]>([]);
@@ -35,49 +51,26 @@ export default function AdminDashboard() {
     useEffect(() => {
         async function fetchStats() {
             try {
-                // 1. Fetch Counts
-                const guards = await databases.listDocuments(DB_ID, COLLECTIONS.GUARDS);
-                const clients = await databases.listDocuments(DB_ID, COLLECTIONS.CLIENTS);
+                // 1. Fetch All Data (Limit 100 for now, ideally pagination)
+                const guardsRes = await databases.listDocuments(DB_ID, COLLECTIONS.GUARDS, [Query.limit(100)]);
+                const clientsRes = await databases.listDocuments(DB_ID, COLLECTIONS.CLIENTS, [Query.limit(100)]);
+                const evalsRes = await databases.listDocuments(DB_ID, COLLECTIONS.EVALUATIONS, [Query.limit(100)]);
 
-                // 2. Fetch Evals for Avg Score & Top Guards
-                const evals = await databases.listDocuments(DB_ID, COLLECTIONS.EVALUATIONS);
-
-                let totalScore = 0;
-                const guardScores: Record<string, { name: string, total: number, count: number }> = {};
-
-                // Map guard ID to Name first
-                const guardMap = new Map(guards.documents.map((g: any) => [g.guardId, g.name]));
-
-                evals.documents.forEach((doc: any) => {
-                    totalScore += doc.totalScore || 0;
-
-                    if (!guardScores[doc.guardId]) {
-                        guardScores[doc.guardId] = {
-                            name: guardMap.get(doc.guardId) || doc.guardId,
-                            total: 0,
-                            count: 0
-                        };
-                    }
-                    guardScores[doc.guardId].total += doc.totalScore || 0;
-                    guardScores[doc.guardId].count += 1;
-                });
-
-                const avg = evals.total > 0 ? (totalScore / evals.total).toFixed(1) : '0';
-
-                // Calculate Top 5
-                const sortedGuards = Object.values(guardScores)
-                    .map(g => ({ ...g, average: (g.total / g.count).toFixed(1) }))
-                    .sort((a, b) => Number(b.average) - Number(a.average))
-                    .slice(0, 5);
-
+                // 2. Real-time Status Counts
+                // (Assuming no 'status' field yet, so relying on total count. Terminated/Deactivated = 0 as requested)
                 setStats({
-                    totalGuards: guards.total,
-                    totalClients: clients.total,
-                    avgScore: Number(avg),
-                    activeAlerts: 3
+                    totalGuards: guardsRes.total,
+                    totalClients: clientsRes.total,
+                    avgScore: calculateAvgScore(evalsRes.documents),
+                    activeAlerts: 0
                 });
 
-                setTopGuards(sortedGuards);
+                // 3. Process Graph Data (Last 3 Months, 15th & 30th)
+                const processedGraph = processGraphData(guardsRes.documents, clientsRes.documents);
+                setGraphData(processedGraph);
+
+                // 4. Process Top Guards
+                processTopGuards(evalsRes.documents, guardsRes.documents);
 
             } catch (e) {
                 console.error("Error fetching admin stats", e);
@@ -90,6 +83,75 @@ export default function AdminDashboard() {
             fetchStats();
         }
     }, [currentView]);
+
+    // Graph Data Helpers
+    const processGraphData = (guards: any[], clients: any[]) => {
+        const now = new Date();
+        const buckets = [];
+
+        // Generate last 3 months buckets (15th and End of Day)
+        for (let i = 2; i >= 0; i--) {
+            const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const monthName = date.toLocaleString('default', { month: 'short' });
+
+            // 15th
+            buckets.push({
+                label: `${monthName} 15`,
+                date: new Date(date.getFullYear(), date.getMonth(), 15)
+            });
+            // End of Month (~30th)
+            buckets.push({
+                label: `${monthName} 30`,
+                date: new Date(date.getFullYear(), date.getMonth() + 1, 0)
+            });
+        }
+
+        return buckets.map(bucket => {
+            const guardCount = guards.filter(g => new Date(g.$createdAt) <= bucket.date).length;
+            const clientCount = clients.filter(c => new Date(c.$createdAt) <= bucket.date).length;
+            return {
+                name: bucket.label,
+                guards: guardCount,
+                clients: clientCount
+            };
+        });
+    };
+
+    const calculateAvgScore = (docs: any[]) => {
+        if (!docs.length) return 0;
+        const total = docs.reduce((acc, doc) => acc + (doc.totalScore || 0), 0);
+        return (total / docs.length).toFixed(1);
+    };
+
+    const processTopGuards = (evals: any[], guards: any[]) => {
+        const guardMap = new Map(guards.map((g: any) => [g.guardId, g.name])); // Use guardId property (SPG-0001) not system ID
+        const guardScores: Record<string, { id: string, name: string, total: number, count: number }> = {};
+
+        evals.forEach((doc: any) => {
+            // For Penalty Points: Lower is Better.
+            // But "Top Performing" usually implies "Best".
+            // With Penalty Points, "Best" = Lowest Score.
+            // We need to clarify if "Avg Score" display should be inverted or just raw points.
+            // Assuming raw Penalty Points for now.
+            if (!guardScores[doc.guardId]) {
+                guardScores[doc.guardId] = {
+                    id: doc.guardId,
+                    name: guardMap.get(doc.guardId) || doc.guardId,
+                    total: 0,
+                    count: 0
+                };
+            }
+            guardScores[doc.guardId].total += doc.totalScore || 0;
+            guardScores[doc.guardId].count += 1;
+        });
+
+        const sorted = Object.values(guardScores)
+            .map(g => ({ ...g, average: (g.total / g.count).toFixed(1) }))
+            .sort((a, b) => Number(a.average) - Number(b.average)) // Ascending for Penalty Points (Lower is better)
+            .slice(0, 5);
+
+        setTopGuards(sorted);
+    };
 
     const handleSelectGuard = (guardId: string, guardName: string) => {
         setSelectedGuard({ id: guardId, name: guardName });
@@ -135,9 +197,9 @@ export default function AdminDashboard() {
                 <Card className="p-6 border-l-4 border-l-gold-500">
                     <div className="flex justify-between items-start">
                         <div>
-                            <p className="text-gray-400 text-sm font-medium">Avg Overall Score</p>
-                            <h3 className="text-4xl font-bold text-gold-500 mt-2">{stats.avgScore}%</h3>
-                            <p className="text-xs text-gold-400/70 mt-2">System Wide Performance</p>
+                            <p className="text-gray-400 text-sm font-medium">Avg Penalty Pts</p>
+                            <h3 className="text-4xl font-bold text-gold-500 mt-2">{stats.avgScore}</h3>
+                            <p className="text-xs text-gold-400/70 mt-2">System Wide Average</p>
                         </div>
                         <div className="p-3 bg-gold-500/10 rounded-lg">
                             <Activity className="w-8 h-8 text-gold-500" />
@@ -158,7 +220,7 @@ export default function AdminDashboard() {
                     </div>
                     <div className="h-64 w-full">
                         <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={mockGraphData}>
+                            <AreaChart data={graphData}>
                                 <defs>
                                     <linearGradient id="colorGuards" x1="0" y1="0" x2="0" y2="1">
                                         <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -189,11 +251,11 @@ export default function AdminDashboard() {
                     <div className="space-y-4">
                         <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-between">
                             <span className="text-red-400 font-medium">Terminated Guards</span>
-                            <span className="text-2xl font-bold text-white">2</span>
+                            <span className="text-2xl font-bold text-white">0</span>
                         </div>
                         <div className="p-4 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-between">
                             <span className="text-orange-400 font-medium">Deactivated Clients</span>
-                            <span className="text-2xl font-bold text-white">1</span>
+                            <span className="text-2xl font-bold text-white">0</span>
                         </div>
                         <div className="p-4 rounded-lg bg-dark-700/50 border border-white/5 flex items-center justify-between">
                             <div className="text-xs text-gray-500">
@@ -207,7 +269,7 @@ export default function AdminDashboard() {
             {/* Row 3: Top Guards List */}
             <Card className="p-6 bg-dark-800/50">
                 <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-lg font-bold text-white">Top Performing Guards</h3>
+                    <h3 className="text-lg font-bold text-white">Top Performing Guards (Lowest Time/Penalty Pts)</h3>
                     <button className="text-xs text-gold-500 hover:text-gold-400">View Full Reports</button>
                 </div>
                 <div className="overflow-x-auto">
@@ -216,7 +278,8 @@ export default function AdminDashboard() {
                             <tr className="text-gray-500 text-sm border-b border-white/5">
                                 <th className="pb-3 pl-2">Rank</th>
                                 <th className="pb-3">Guard Name</th>
-                                <th className="pb-3 text-right">Avg. Score</th>
+                                <th className="pb-3">ID</th>
+                                <th className="pb-3 text-right">Avg. Penalty</th>
                                 <th className="pb-3 text-right">Evaluations</th>
                                 <th className="pb-3 text-right">Status</th>
                             </tr>
@@ -225,30 +288,47 @@ export default function AdminDashboard() {
                             {topGuards.length === 0 ? (
                                 <tr><td colSpan={5} className="p-4 text-center text-gray-500">No data available</td></tr>
                             ) : (
-                                topGuards.map((guard, idx) => (
-                                    <tr
-                                        key={idx}
-                                        className="border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors cursor-pointer"
-                                        onClick={() => handleSelectGuard(guard.name, guard.name)} // Using name as ID for now since stats are aggregated by ID but mapped to name. Ideally pass real ID.
-                                    >
-                                        <td className="py-4 pl-2">
-                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${idx === 0 ? 'bg-gold-500 text-black' :
-                                                idx === 1 ? 'bg-gray-300 text-black' :
-                                                    idx === 2 ? 'bg-orange-700 text-white' : 'bg-dark-700 text-gray-400'
-                                                }`}>
-                                                {idx + 1}
-                                            </div>
-                                        </td>
-                                        <td className="py-4 font-medium text-white">{guard.name}</td>
-                                        <td className="py-4 text-right">
-                                            <span className="text-gold-500 font-bold">{guard.average}</span>
-                                        </td>
-                                        <td className="py-4 text-right text-gray-400">{guard.count}</td>
-                                        <td className="py-4 text-right">
-                                            <span className="px-2 py-1 rounded-full bg-green-500/20 text-green-400 text-xs">Excellent</span>
-                                        </td>
-                                    </tr>
-                                ))
+                                topGuards.map((guard, idx) => {
+                                    const avg = Number(guard.average);
+                                    let statusColor = 'bg-green-500/20 text-green-400';
+                                    let statusText = 'Excellent';
+
+                                    if (avg >= 7) {
+                                        statusColor = 'bg-red-500/20 text-red-400';
+                                        statusText = 'Critical';
+                                    } else if (avg >= 3) {
+                                        statusColor = 'bg-orange-500/20 text-orange-400';
+                                        statusText = 'Warning';
+                                    }
+
+                                    return (
+                                        <tr
+                                            key={idx}
+                                            className="border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors cursor-pointer"
+                                            onClick={() => handleSelectGuard(guard.id, guard.name)}
+                                        >
+                                            <td className="py-4 pl-2">
+                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${idx === 0 ? 'bg-gold-500 text-black' :
+                                                    idx === 1 ? 'bg-gray-300 text-black' :
+                                                        idx === 2 ? 'bg-orange-700 text-white' : 'bg-dark-700 text-gray-400'
+                                                    }`}>
+                                                    {idx + 1}
+                                                </div>
+                                            </td>
+                                            <td className="py-4 font-medium text-white">{guard.name}</td>
+                                            <td className="py-4 text-xs text-gray-500 font-mono">{guard.id}</td>
+                                            <td className="py-4 text-right">
+                                                <span className={`font-bold ${avg === 0 ? 'text-green-500' : 'text-red-400'}`}>{guard.average}</span>
+                                            </td>
+                                            <td className="py-4 text-right text-gray-400">{guard.count}</td>
+                                            <td className="py-4 text-right">
+                                                <span className={`px-2 py-1 rounded-full text-xs hover:opacity-80 ${statusColor}`}>
+                                                    {statusText}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    )
+                                })
                             )}
                         </tbody>
                     </table>
@@ -268,7 +348,7 @@ export default function AdminDashboard() {
                         {currentView === 'guard_profile' && 'Guard Profile'}
                     </h1>
                     <p className="text-gray-400">
-                        {currentView === 'overview' && 'Welcome back, Operations Manager!'}
+                        {currentView === 'overview' && `Welcome back, ${userProfile.name}!`}
                         {currentView === 'guards' && 'Manage security personnel and assignments'}
                         {currentView === 'clients' && 'Manage client accounts and contracts'}
                         {currentView === 'guard_profile' && 'Detailed performance metrics'}
@@ -288,7 +368,7 @@ export default function AdminDashboard() {
                         <Bell className="w-5 h-5" />
                     </button>
                     <div className="w-10 h-10 rounded-full bg-gold-500 flex items-center justify-center text-black font-bold">
-                        OM
+                        {userProfile.initials}
                     </div>
                 </div>
             </header>

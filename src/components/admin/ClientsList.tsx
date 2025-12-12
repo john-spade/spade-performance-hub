@@ -14,7 +14,12 @@ export default function ClientsList() {
 
     // Add Client State
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [newClient, setNewClient] = useState({ name: '', clientId: '', password: '' });
+    const [newClient, setNewClient] = useState({ name: '', clientId: '', password: '', representativeName: '', email: '' });
+
+    // Edit Client State
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editingClient, setEditingClient] = useState<any>(null); // Using any for partial updates
+
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
 
@@ -46,7 +51,7 @@ export default function ClientsList() {
     };
 
     const handleAddClient = async () => {
-        if (!newClient.name || !newClient.clientId || !newClient.password) {
+        if (!newClient.name || !newClient.clientId || !newClient.password || !newClient.representativeName) {
             setNotification({
                 isOpen: true,
                 type: 'error',
@@ -75,8 +80,10 @@ export default function ClientsList() {
                 ID.unique(),
                 {
                     name: newClient.name,
-                    clientId: newClient.clientId, // Ensure schema map matches 'clientId'
+                    clientId: newClient.clientId,
                     password: newClient.password,
+                    representativeName: newClient.representativeName,
+                    email: newClient.email,
                     createdAt: new Date().toISOString()
                 }
             );
@@ -89,7 +96,7 @@ export default function ClientsList() {
             });
 
             setIsAddModalOpen(false);
-            setNewClient({ name: '', clientId: '', password: '' });
+            setNewClient({ name: '', clientId: '', password: '', representativeName: '', email: '' });
             fetchClients();
 
         } catch (error: any) {
@@ -132,6 +139,52 @@ export default function ClientsList() {
         c.clientId.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    const openEditModal = (client: any) => {
+        setEditingClient({
+            $id: client.$id,
+            name: client.name,
+            clientId: client.clientId,
+            representativeName: client.representativeName || '',
+            email: client.email || ''
+        });
+        setIsEditModalOpen(true);
+    };
+
+    const handleUpdateClient = async () => {
+        if (!editingClient) return;
+        setIsSubmitting(true);
+        try {
+            await databases.updateDocument(
+                DB_ID,
+                COLLECTIONS.CLIENTS,
+                editingClient.$id,
+                {
+                    name: editingClient.name,
+                    representativeName: editingClient.representativeName,
+                    email: editingClient.email
+                }
+            );
+
+            setNotification({
+                isOpen: true,
+                type: 'success',
+                title: 'Updated',
+                message: 'Client updated successfully'
+            });
+            setIsEditModalOpen(false);
+            fetchClients();
+        } catch (error: any) {
+            setNotification({
+                isOpen: true,
+                type: 'error',
+                title: 'Error',
+                message: 'Failed to update client'
+            });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
             {/* Header & Controls */}
@@ -171,6 +224,8 @@ export default function ClientsList() {
                         <tr>
                             <th className="p-4 font-medium border-b border-white/5">Client ID</th>
                             <th className="p-4 font-medium border-b border-white/5">Company Name</th>
+                            <th className="p-4 font-medium border-b border-white/5">Rep Name</th>
+                            <th className="p-4 font-medium border-b border-white/5">Email</th>
                             <th className="p-4 font-medium border-b border-white/5">Password</th>
                             <th className="p-4 font-medium border-b border-white/5">Created Date</th>
                             <th className="p-4 font-medium border-b border-white/5 text-right">Actions</th>
@@ -178,14 +233,20 @@ export default function ClientsList() {
                     </thead>
                     <tbody className="text-gray-300 divide-y divide-white/5">
                         {loading ? (
-                            <tr><td colSpan={5} className="p-8 text-center">Loading clients...</td></tr>
+                            <tr><td colSpan={7} className="p-8 text-center">Loading clients...</td></tr>
                         ) : filteredClients.length === 0 ? (
-                            <tr><td colSpan={5} className="p-8 text-center text-gray-500">No clients found.</td></tr>
+                            <tr><td colSpan={7} className="p-8 text-center text-gray-500">No clients found.</td></tr>
                         ) : (
                             filteredClients.map((client) => (
-                                <tr key={client.$id} className="hover:bg-white/5 transition-colors group">
+                                <tr
+                                    key={client.$id}
+                                    className="hover:bg-white/5 transition-colors group cursor-pointer"
+                                    onClick={() => openEditModal(client)}
+                                >
                                     <td className="p-4 font-mono text-purple-400">{client.clientId}</td>
                                     <td className="p-4 font-medium text-white">{client.name}</td>
+                                    <td className="p-4 text-gray-400">{client.representativeName || '-'}</td>
+                                    <td className="p-4 text-gray-400 text-sm">{client.email || '-'}</td>
                                     <td className="p-4 text-gray-500 font-mono text-xs">
                                         ••••••••
                                     </td>
@@ -194,7 +255,7 @@ export default function ClientsList() {
                                     </td>
                                     <td className="p-4 text-right">
                                         <button
-                                            onClick={() => handleDeleteClient(client.$id, client.name)}
+                                            onClick={(e) => { e.stopPropagation(); handleDeleteClient(client.$id, client.name); }}
                                             className="text-gray-600 hover:text-red-500 transition-colors p-2"
                                             title="Delete Client"
                                         >
@@ -211,6 +272,56 @@ export default function ClientsList() {
                     <span>Total: {clients.length}</span>
                 </div>
             </Card>
+
+            {/* Edit Modal */}
+            {isEditModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <Card className="w-full max-w-md p-6 border-purple-500/30">
+                        <h3 className="text-xl font-bold text-white mb-4">Edit Client</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs text-gray-400 mb-1 block">Company Name</label>
+                                <Input
+                                    value={editingClient.name}
+                                    onChange={(e) => setEditingClient({ ...editingClient, name: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400 mb-1 block">Client ID</label>
+                                <Input
+                                    value={editingClient.clientId}
+                                    disabled
+                                    className="opacity-50 cursor-not-allowed border-none bg-white/5"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400 mb-1 block">Representative Name</label>
+                                <Input
+                                    value={editingClient.representativeName}
+                                    onChange={(e) => setEditingClient({ ...editingClient, representativeName: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400 mb-1 block">Email</label>
+                                <Input
+                                    value={editingClient.email}
+                                    onChange={(e) => setEditingClient({ ...editingClient, email: e.target.value })}
+                                />
+                            </div>
+                        </div>
+                        <div className="flex gap-3 mt-8">
+                            <Button variant="outline" className="flex-1" onClick={() => setIsEditModalOpen(false)}>Cancel</Button>
+                            <Button
+                                className="flex-1 bg-purple-500 text-white hover:bg-purple-400"
+                                onClick={handleUpdateClient}
+                                disabled={isSubmitting}
+                            >
+                                {isSubmitting ? 'Saving...' : 'Save Changes'}
+                            </Button>
+                        </div>
+                    </Card>
+                </div>
+            )}
 
             {/* Add Modal */}
             {isAddModalOpen && (
@@ -232,6 +343,23 @@ export default function ClientsList() {
                                     placeholder="e.g. CL-001"
                                     value={newClient.clientId}
                                     onChange={(e) => setNewClient({ ...newClient, clientId: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400 mb-1 block">Representative Name (Evaluator)</label>
+                                <Input
+                                    placeholder="e.g. Sarah Connor"
+                                    value={newClient.representativeName}
+                                    onChange={(e) => setNewClient({ ...newClient, representativeName: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400 mb-1 block">Email (For Notifications)</label>
+                                <Input
+                                    placeholder="e.g. contact@acme.com"
+                                    type="email"
+                                    value={newClient.email}
+                                    onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
                                 />
                             </div>
                             <div>

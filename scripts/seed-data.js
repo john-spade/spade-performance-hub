@@ -55,6 +55,32 @@ const DATA = {
 async function seed() {
     console.log('Seeding Data...');
 
+    // 1. Create Attributes (Schema Update)
+    try {
+        console.log('Checking/Creating Attributes...');
+
+        // representativeName
+        try {
+            await databases.createStringAttribute(DB_ID, COLLECTIONS.CLIENTS, 'representativeName', 100, false);
+            console.log('Created Attribute: representativeName');
+        } catch (e) {
+            if (e.code !== 409) console.log(`Error creating representativeName: ${e.message}`);
+        }
+
+        // email
+        try {
+            await databases.createStringAttribute(DB_ID, COLLECTIONS.CLIENTS, 'email', 255, false);
+            console.log('Created Attribute: email');
+        } catch (e) {
+            if (e.code !== 409) console.log(`Error creating email: ${e.message}`);
+        }
+
+        // Wait a bit for attribute to be available (Appwrite async)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (e) {
+        console.log(`Attribute setup error: ${e.message}`);
+    }
+
     // Clients
     for (const c of DATA.clients) {
         try {

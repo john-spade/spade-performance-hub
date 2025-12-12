@@ -2,40 +2,23 @@ import { databases, DB_ID, COLLECTIONS } from './appwrite';
 import { ID, Permission, Role } from 'appwrite';
 
 const MOCK_CLIENTS = [
-    {
-        name: "Elimate",
-        clientId: "SS-001-A",
-        password: "Spade-001",
-        createdAt: "2025-01-01T00:00:00Z"
-    }
+    // {
+    //     name: "Elimate",
+    //     clientId: "SS-001-A",
+    //     password: "Spade-001",
+    //     representativeName: "Sarah Connor",
+    //     email: "sarah@elimate.com",
+    //     createdAt: "2025-01-01T00:00:00Z"
+    // }
 ];
 
 const MOCK_GUARDS = [
-    {
-        name: "John Spade",
-        guardId: "SPG-0001",
-        createdAt: "2025-01-01T00:00:00Z"
-    },
-    {
-        name: "Carl Dim",
-        guardId: "SPG-00012",
-        createdAt: "2025-01-01T00:00:00Z"
-    }
+    // {
+    //     name: "John Spade",
+    //     guardId: "SPG-0001",
+    //     createdAt: "2025-01-01T00:00:00Z"
+    // }
 ];
-
-const MOCK_EVALUATION = {
-    clientId: "SS-001-A",
-    guardId: "SPG-0001",
-    kpi_scores: JSON.stringify({
-        "attendance": 9,
-        "alertness": 8,
-        "professionalism": 10,
-        "reporting": 9
-    }), // Storing as JSON string since using mocked structure
-    totalScore: 36,
-    createdAt: "2025-01-03T14:00:00Z",
-    editableUntil: "2025-01-04T02:00:00Z"
-};
 
 export async function seedDatabase() {
     console.log("Starting Data Seeding...");
@@ -72,19 +55,7 @@ export async function seedDatabase() {
         }
     }
 
-    // Seed Mock Evaluation
-    try {
-        await databases.createDocument(
-            DB_ID,
-            COLLECTIONS.EVALUATIONS,
-            ID.unique(),
-            MOCK_EVALUATION,
-            [Permission.read(Role.any()), Permission.write(Role.any())]
-        );
-        console.log("Created Mock Evaluation");
-    } catch (error) {
-        console.error("Error creating mock evaluation:", error);
-    }
+
 
     alert("Seeding complete! Check console for details.");
 }

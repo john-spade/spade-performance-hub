@@ -4,6 +4,8 @@ export interface ClientDocument extends Models.Document {
     name: string;
     clientId: string;
     password: string; // In real app, this should be hashed/handled securely
+    representativeName?: string; // Point of Contact / Operations Manager
+    email?: string; // For automated receipts
 }
 
 export interface GuardDocument extends Models.Document {

@@ -3,7 +3,7 @@ import { databases, DB_ID, COLLECTIONS } from '../../lib/appwrite';
 import { Query } from 'appwrite';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { ArrowLeft, Star, Calendar, ClipboardList } from 'lucide-react';
+import { ArrowLeft, Star, ClipboardList, AlertTriangle, CheckCircle } from 'lucide-react';
 
 interface GuardProfileProps {
     guardId: string;
@@ -15,16 +15,15 @@ export default function GuardProfile({ guardId, guardName, onBack }: GuardProfil
     const [evaluations, setEvaluations] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState({
-        averageScore: 0,
+        averagePenalty: 0,
         totalEvals: 0,
-        highestScore: 0,
-        lowestScore: 0
+        totalWarnings: 0,
+        perfectScores: 0
     });
 
     useEffect(() => {
         const fetchGuardData = async () => {
             try {
-                // Fetch all evaluations for this guard
                 const response = await databases.listDocuments(
                     DB_ID,
                     COLLECTIONS.EVALUATIONS,
@@ -48,14 +47,18 @@ export default function GuardProfile({ guardId, guardName, onBack }: GuardProfil
 
                 // Calculate Stats
                 if (evals.length > 0) {
-                    const totalScore = evals.reduce((acc: number, curr: any) => acc + (curr.totalScore || 0), 0);
+                    const totalPenalty = evals.reduce((acc: number, curr: any) => acc + (curr.totalScore || 0), 0);
                     const scores = evals.map((e: any) => e.totalScore || 0);
 
+                    // Count specific thresholds
+                    const warnings = scores.filter((s: number) => s >= 3).length; // 3+ is worth noting
+                    const perfects = scores.filter((s: number) => s === 0).length;
+
                     setStats({
-                        averageScore: Number((totalScore / evals.length).toFixed(1)),
+                        averagePenalty: Number((totalPenalty / evals.length).toFixed(1)),
                         totalEvals: evals.length,
-                        highestScore: Math.max(...scores),
-                        lowestScore: Math.min(...scores)
+                        totalWarnings: warnings,
+                        perfectScores: perfects
                     });
                 }
 
@@ -69,10 +72,12 @@ export default function GuardProfile({ guardId, guardName, onBack }: GuardProfil
         fetchGuardData();
     }, [guardId]);
 
-    const getScoreColor = (score: number) => {
-        if (score >= 90) return 'text-green-400';
-        if (score >= 70) return 'text-gold-500';
-        return 'text-red-400';
+    // In Penalty System: 0 is Good (Green), High is Bad (Red)
+    const getPenaltyColor = (score: number) => {
+        if (score === 0) return 'text-green-400';
+        if (score < 3) return 'text-gold-400'; // Minor issues
+        if (score < 7) return 'text-orange-400'; // Warning Level
+        return 'text-red-500'; // Serious/Separation Level
     };
 
     return (
@@ -91,10 +96,10 @@ export default function GuardProfile({ guardId, guardName, onBack }: GuardProfil
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Card className="p-4 border-l-4 border-l-gold-500">
-                    <p className="text-gray-400 text-xs uppercase font-bold">Average Score</p>
+                    <p className="text-gray-400 text-xs uppercase font-bold">Avg Penalty Points</p>
                     <div className="flex items-center gap-2 mt-2">
-                        <Star className="w-5 h-5 text-gold-500" />
-                        <span className="text-2xl font-bold text-white">{stats.averageScore}</span>
+                        <AlertTriangle className="w-5 h-5 text-gold-500" />
+                        <span className="text-2xl font-bold text-white">{stats.averagePenalty}</span>
                     </div>
                 </Card>
                 <Card className="p-4 border-l-4 border-l-blue-500">
@@ -105,15 +110,17 @@ export default function GuardProfile({ guardId, guardName, onBack }: GuardProfil
                     </div>
                 </Card>
                 <Card className="p-4 border-l-4 border-l-green-500">
-                    <p className="text-gray-400 text-xs uppercase font-bold">Highest Score</p>
+                    <p className="text-gray-400 text-xs uppercase font-bold">Perfect Records (0 pts)</p>
                     <div className="flex items-center gap-2 mt-2">
-                        <span className="text-2xl font-bold text-green-400">{stats.highestScore}</span>
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        <span className="text-2xl font-bold text-green-400">{stats.perfectScores}</span>
                     </div>
                 </Card>
                 <Card className="p-4 border-l-4 border-l-red-500">
-                    <p className="text-gray-400 text-xs uppercase font-bold">Lowest Score</p>
+                    <p className="text-gray-400 text-xs uppercase font-bold">Penalty Flags (3+ pts)</p>
                     <div className="flex items-center gap-2 mt-2">
-                        <span className="text-2xl font-bold text-red-400">{stats.lowestScore}</span>
+                        <Star className="w-5 h-5 text-red-500" />
+                        <span className="text-2xl font-bold text-red-400">{stats.totalWarnings}</span>
                     </div>
                 </Card>
             </div>
@@ -128,12 +135,12 @@ export default function GuardProfile({ guardId, guardName, onBack }: GuardProfil
                         <thead className="bg-dark-900 text-gray-400">
                             <tr>
                                 <th className="p-4">Date</th>
-                                <th className="p-4">Total Score</th>
-                                <th className="p-4">Appearance</th>
+                                <th className="p-4">Total Penalty</th>
+                                <th className="p-4">Punctuality</th>
                                 <th className="p-4">Attendance</th>
-                                <th className="p-4">Alertness</th>
-                                <th className="p-4">Communication</th>
-                                <th className="p-4">Attitude</th>
+                                <th className="p-4">Patrol</th>
+                                <th className="p-4">DAR</th>
+                                <th className="p-4">Conduct</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
@@ -151,15 +158,21 @@ export default function GuardProfile({ guardId, guardName, onBack }: GuardProfil
                                             </div>
                                         </td>
                                         <td className="p-4">
-                                            <span className={`font-bold text-lg ${getScoreColor(ev.totalScore)}`}>
+                                            <span className={`font-bold text-lg ${getPenaltyColor(ev.totalScore)}`}>
                                                 {ev.totalScore}
                                             </span>
+                                            {ev.recommendation && (
+                                                <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">
+                                                    {ev.recommendation}
+                                                </div>
+                                            )}
                                         </td>
-                                        <td className="p-4 text-gray-400">{ev.scores.appearance || '-'}</td>
-                                        <td className="p-4 text-gray-400">{ev.scores.attendance || '-'}</td>
-                                        <td className="p-4 text-gray-400">{ev.scores.alertness || '-'}</td>
-                                        <td className="p-4 text-gray-400">{ev.scores.communication || '-'}</td>
-                                        <td className="p-4 text-gray-400">{ev.scores.attitude || '-'}</td>
+                                        {/* New keys based on updated EvaluationForm */}
+                                        <td className="p-4 text-gray-400">{ev.scores.punctuality !== undefined ? ev.scores.punctuality : '-'}</td>
+                                        <td className="p-4 text-gray-400">{ev.scores.attendance !== undefined ? ev.scores.attendance : '-'}</td>
+                                        <td className="p-4 text-gray-400">{ev.scores.patrol !== undefined ? ev.scores.patrol : '-'}</td>
+                                        <td className="p-4 text-gray-400">{ev.scores.dar !== undefined ? ev.scores.dar : '-'}</td>
+                                        <td className="p-4 text-gray-400">{ev.scores.conduct !== undefined ? ev.scores.conduct : '-'}</td>
                                     </tr>
                                 ))
                             )}

@@ -17,17 +17,13 @@ interface EvaluationData {
     guardName: string;
     guardId: string;
     date: string;
-    // KPI Scores
+    recommendation: string;
+    // New KPI Scores (Penalty Points)
+    punctuality: number;
     attendance: number;
-    appearance: number;
-    alertness: number;
-    communication: number;
-    reporting: number;
-    procedures: number;
-    emergency_response: number;
-    customer_service: number;
-    attitude: number;
-    equipment: number;
+    patrol: number;
+    dar: number;
+    conduct: number;
     totalPoints: number;
 }
 
@@ -57,7 +53,7 @@ export default function ClientDashboard({ clientData, onLogout }: ClientDashboar
         const evalDate = new Date(dateString);
         const now = new Date();
         const diffInHours = (now.getTime() - evalDate.getTime()) / (1000 * 60 * 60);
-        return diffInHours < 12;
+        return diffInHours < 24; // Extended to 24h as per some typical operational needs, or keep 12
     };
 
     useEffect(() => {
@@ -96,16 +92,12 @@ export default function ClientDashboard({ clientData, onLogout }: ClientDashboar
                         guardName: guardMap.get(doc.guardId) || doc.guardId,
                         guardId: doc.guardId,
                         date: doc.createdAt,
+                        recommendation: getRecommendationText(doc.totalScore || 0),
+                        punctuality: scores['punctuality'] || 0,
                         attendance: scores['attendance'] || 0,
-                        appearance: scores['appearance'] || 0,
-                        alertness: scores['alertness'] || 0,
-                        communication: scores['communication'] || 0,
-                        reporting: scores['reporting'] || 0,
-                        procedures: scores['procedures'] || 0,
-                        emergency_response: scores['emergency_response'] || 0,
-                        customer_service: scores['customer_service'] || 0,
-                        attitude: scores['attitude'] || 0,
-                        equipment: scores['equipment'] || 0,
+                        patrol: scores['patrol'] || 0,
+                        dar: scores['dar'] || 0,
+                        conduct: scores['conduct'] || 0,
                         totalPoints: doc.totalScore || 0
                     };
                 });
@@ -204,20 +196,27 @@ export default function ClientDashboard({ clientData, onLogout }: ClientDashboar
 
     const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
 
+    // Inverted Logic: 0 is Green, Higher is Red
     const getScoreColor = (score: number) => {
-        if (score >= 90) return 'text-green-400';
-        if (score >= 70) return 'text-gold-500';
+        if (score === 0) return 'text-green-400';
+        if (score <= 3) return 'text-gold-500';
         return 'text-red-400';
     };
 
-    const getRemark = (score: number) => {
-        if (score >= 85) {
-            return { label: 'Maintain', color: 'bg-green-500/20 text-green-400 border-green-500/30' };
-        } else if (score >= 60) {
-            return { label: 'Warning', color: 'bg-gold-500/20 text-gold-500 border-gold-500/30' };
-        } else {
-            return { label: 'Terminate', color: 'bg-red-500/20 text-red-400 border-red-500/30' };
-        }
+    // Mirrors the logic in EvaluationForm
+    const getRecommendationText = (total: number) => {
+        if (total >= 10) return 'SEPARATION';
+        if (total >= 7) return 'FINAL WRITE-UP';
+        if (total >= 3) return 'VERBAL/WRITTEN WARNING';
+        return 'GOOD STANDING';
+    };
+
+    const getRemarkStyle = (recommendation: string) => {
+        const rec = recommendation.toUpperCase();
+        if (rec.includes('SEPARATION') || rec.includes('TERMINATE')) return 'bg-red-500/20 text-red-400 border-red-500/30';
+        if (rec.includes('FINAL') || rec.includes('WARNING')) return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
+        if (rec.includes('VERBAL') || rec.includes('WRITTEN')) return 'bg-gold-500/20 text-gold-500 border-gold-500/30';
+        return 'bg-green-500/20 text-green-400 border-green-500/30'; // Good Standing
     };
 
     if (!clientData) {
@@ -288,29 +287,24 @@ export default function ClientDashboard({ clientData, onLogout }: ClientDashboar
                             <tr>
                                 <th className="p-4 pl-6 sticky left-0 bg-dark-800 z-10 shadow-lg shadow-black/20">Guard</th>
                                 <th className="p-4">Date</th>
-                                <th className="p-4 text-center">Uniform</th>
-                                <th className="p-4 text-center">Attendance</th>
-                                <th className="p-4 text-center">Alertness</th>
-                                <th className="p-4 text-center">Comm.</th>
-                                <th className="p-4 text-center">Reports</th>
-                                <th className="p-4 text-center">Procedure</th>
-                                <th className="p-4 text-center">Response</th>
-                                <th className="p-4 text-center">Service</th>
-                                <th className="p-4 text-center">Attitude</th>
-                                <th className="p-4 text-center">Equip.</th>
-                                <th className="p-4 text-center font-bold text-white">Total</th>
-                                <th className="p-4 text-center">Remark</th>
-                                <th className="p-4 pr-6 text-right sticky right-0 bg-dark-800 z-10">Actions</th>
+                                <th className="p-4 text-center">Time</th>
+                                <th className="p-4 text-center">Attd.</th>
+                                <th className="p-4 text-center">Patrol</th>
+                                <th className="p-4 text-center">DAR</th>
+                                <th className="p-4 text-center">Conduct</th>
+                                <th className="p-4 text-center font-bold text-white">Penalty Pts</th>
+                                <th className="p-4 text-center">Action</th>
+                                <th className="p-4 pr-6 text-right sticky right-0 bg-dark-800 z-10">Status</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
                             {loading ? (
-                                <tr><td colSpan={15} className="p-8 text-center text-gray-500">Loading evaluations...</td></tr>
+                                <tr><td colSpan={10} className="p-8 text-center text-gray-500">Loading evaluations...</td></tr>
                             ) : filteredEvals.length === 0 ? (
-                                <tr><td colSpan={15} className="p-8 text-center text-gray-500">No evaluations found.</td></tr>
+                                <tr><td colSpan={10} className="p-8 text-center text-gray-500">No evaluations found.</td></tr>
                             ) : (
                                 filteredEvals.map((ev) => {
-                                    const remark = getRemark(ev.totalPoints);
+                                    const remarkStyle = getRemarkStyle(ev.recommendation);
                                     const isEditable = canEdit(ev.date);
 
                                     return (
@@ -330,17 +324,12 @@ export default function ClientDashboard({ clientData, onLogout }: ClientDashboar
                                                 {new Date(ev.date).toLocaleDateString('en-CA')}
                                             </td>
 
-                                            {/* KPI Columns */}
-                                            <td className="p-4 text-center text-gray-300">{ev.appearance}</td>
-                                            <td className="p-4 text-center text-gray-300">{ev.attendance}</td>
-                                            <td className="p-4 text-center text-gray-300">{ev.alertness}</td>
-                                            <td className="p-4 text-center text-gray-300">{ev.communication}</td>
-                                            <td className="p-4 text-center text-gray-300">{ev.reporting}</td>
-                                            <td className="p-4 text-center text-gray-300">{ev.procedures}</td>
-                                            <td className="p-4 text-center text-gray-300">{ev.emergency_response}</td>
-                                            <td className="p-4 text-center text-gray-300">{ev.customer_service}</td>
-                                            <td className="p-4 text-center text-gray-300">{ev.attitude}</td>
-                                            <td className="p-4 text-center text-gray-300">{ev.equipment}</td>
+                                            {/* KPI Columns (Penalty Points) */}
+                                            <td className="p-4 text-center text-gray-400">{ev.punctuality > 0 ? <span className="text-red-400 font-bold">{ev.punctuality}</span> : '-'}</td>
+                                            <td className="p-4 text-center text-gray-400">{ev.attendance > 0 ? <span className="text-red-400 font-bold">{ev.attendance}</span> : '-'}</td>
+                                            <td className="p-4 text-center text-gray-400">{ev.patrol > 0 ? <span className="text-red-400 font-bold">{ev.patrol}</span> : '-'}</td>
+                                            <td className="p-4 text-center text-gray-400">{ev.dar > 0 ? <span className="text-red-400 font-bold">{ev.dar}</span> : '-'}</td>
+                                            <td className="p-4 text-center text-gray-400">{ev.conduct > 0 ? <span className="text-red-400 font-bold">{ev.conduct}</span> : '-'}</td>
 
                                             <td className="p-4 text-center">
                                                 <span className={`font-bold text-lg ${getScoreColor(ev.totalPoints)}`}>
@@ -348,20 +337,22 @@ export default function ClientDashboard({ clientData, onLogout }: ClientDashboar
                                                 </span>
                                             </td>
                                             <td className="p-4 text-center">
-                                                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${remark.color}`}>
-                                                    {remark.label}
+                                                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${remarkStyle}`}>
+                                                    {ev.recommendation.replace('VERBAL/WRITTEN ', '')}
+                                                    {/* Shorten for table view */}
                                                 </span>
                                             </td>
                                             <td className="p-4 pr-6 text-right sticky right-0 bg-dark-900 group-hover:bg-dark-800 transition-colors z-10">
-                                                {isEditable && (
-                                                    <Button variant="ghost" className="text-gold-500 hover:text-gold-400 hover:bg-gold-500/10 mr-2 text-xs uppercase tracking-wider font-bold h-8">
-                                                        Edit
-                                                    </Button>
-                                                )}
+
                                                 {!isEditable && (
-                                                    <Button variant="ghost" disabled className="text-gray-600 mr-2 text-xs uppercase tracking-wider font-bold h-8 cursor-not-allowed">
-                                                        Locked
-                                                    </Button>
+                                                    <span className="flex items-center justify-end gap-1 text-gray-600 text-xs uppercase tracking-wider font-bold cursor-not-allowed">
+                                                        <Lock className="w-3 h-3" /> Locked
+                                                    </span>
+                                                )}
+                                                {isEditable && (
+                                                    <span className="flex items-center justify-end gap-1 text-gold-500 text-xs uppercase tracking-wider font-bold cursor-pointer">
+                                                        <Clock className="w-3 h-3" /> Open
+                                                    </span>
                                                 )}
                                             </td>
                                         </tr>
