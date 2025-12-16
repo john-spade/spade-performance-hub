@@ -8,19 +8,22 @@ import { Query } from 'appwrite';
 import { NotificationModal } from '@/components/ui/NotificationModal';
 import { Lock, User } from 'lucide-react';
 
-// Admin credentials
-const ADMIN_CREDENTIALS = {
-    username: 'admin-john',
-    password: '1234',
-    role: 'admin'
-};
-
 export default function Login() {
     const navigate = useNavigate();
     const [identifier, setIdentifier] = useState('');
     const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [notification, setNotification] = useState({ isOpen: false, type: 'error' as const, title: '', message: '' });
+    const [notification, setNotification] = useState<{
+        isOpen: boolean;
+        type: 'success' | 'error';
+        title: string; // Added title back
+        message: string;
+    }>({
+        isOpen: false,
+        type: 'error', // Default to error
+        title: '',
+        message: '',
+    });
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -28,76 +31,105 @@ export default function Login() {
 
         try {
             const trimmedIdentifier = identifier.trim();
+            let authEmail = trimmedIdentifier;
 
-            // 1. Check hardcoded admin credentials first
-            if (trimmedIdentifier === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
+            // 1. Resolve Identifier to Email
+            const isEmail = trimmedIdentifier.includes('@');
+
+            if (!isEmail) {
+                // Determine if it's likely a Client ID or Name, or Admin Username
+                // Strategy: Check Clients collection first to see if this matches a client
+                try {
+                    const clientByCode = await databases.listDocuments(
+                        DB_ID,
+                        COLLECTIONS.CLIENTS,
+                        [Query.equal('clientId', trimmedIdentifier)]
+                    );
+
+                    if (clientByCode.total > 0 && clientByCode.documents[0].email) {
+                        authEmail = clientByCode.documents[0].email;
+                        console.log("Resolved Client ID to email:", authEmail);
+                    } else {
+                        // Check by Name
+                        const clientByName = await databases.listDocuments(
+                            DB_ID,
+                            COLLECTIONS.CLIENTS,
+                            [Query.equal('name', trimmedIdentifier)]
+                        );
+
+                        if (clientByName.total > 0 && clientByName.documents[0].email) {
+                            authEmail = clientByName.documents[0].email;
+                            console.log("Resolved Client Name to email:", authEmail);
+                        } else {
+                            // Default to Admin/Generic email construction
+                            // If identifier is simple text like 'john', assume admin domain
+                            authEmail = `${trimmedIdentifier.toLowerCase()}@spadesecurityservices.com`;
+                            console.log("Constructed fallback email:", authEmail);
+                        }
+                    }
+                } catch (err) {
+                    console.warn("Error resolving identifier:", err);
+                    // Fallback to construction
+                    authEmail = `${trimmedIdentifier.toLowerCase()}@spadesecurityservices.com`;
+                }
+            }
+
+            // 2. Clear existing session if any
+            try {
+                await account.deleteSession('current');
+            } catch (e) {
+                // No session to delete
+            }
+
+            // 3. Attempt Appwrite Login
+            console.log('Attempting login with:', authEmail);
+            await account.createEmailPasswordSession(authEmail, password);
+
+            // 4. Determine Role & Route
+            const user = await account.get();
+            console.log("Authenticated User:", user);
+
+            // Logic to distinguish Admin vs Client
+            // Assumption: Admins have specific emails or labels.
+            // For now, checks if email matches admin pattern or if NOT found in Clients collection.
+
+            // Try to find client profile
+            const clientMatch = await databases.listDocuments(
+                DB_ID,
+                COLLECTIONS.CLIENTS,
+                [Query.equal('email', authEmail)]
+            );
+
+            if (clientMatch.total > 0) {
+                // It is a Client
+                const clientData = clientMatch.documents[0];
+                localStorage.setItem('client_session', JSON.stringify(clientData));
+                navigate('/client');
+            } else {
+                // Assume Admin
+                // Ideally, verify admin label/team. For now, default to Admin dashboard if auth passed and not a known client.
                 localStorage.setItem('admin_session', JSON.stringify({
-                    username: ADMIN_CREDENTIALS.username,
-                    role: ADMIN_CREDENTIALS.role,
+                    username: user.name || user.email,
+                    role: 'admin',
                     loggedInAt: new Date().toISOString()
                 }));
                 navigate('/admin');
-                return;
             }
-
-            // 2. Attempt Admin Login (Appwrite Auth)
-            const authAttempts: string[] = [];
-            const isEmail = trimmedIdentifier.includes('@');
-
-            if (isEmail) {
-                authAttempts.push(trimmedIdentifier);
-            } else {
-                authAttempts.push(`${trimmedIdentifier.toLowerCase()}@spadesecurityservices.com`);
-                authAttempts.push(trimmedIdentifier);
-            }
-
-            for (const authEmail of authAttempts) {
-                try {
-                    try {
-                        await account.deleteSession('current');
-                    } catch (e) {
-                        // Ignore
-                    }
-
-                    console.log('Attempting admin login with:', authEmail);
-                    await account.createEmailPasswordSession(authEmail, password);
-                    navigate('/admin');
-                    return;
-                } catch (authError: any) {
-                    if (authError?.code === 429 || authError?.message?.includes('429') || authError?.message?.includes('Too Many')) {
-                        throw new Error('Too many login attempts. Please wait 5-10 minutes before trying again.');
-                    }
-                    console.log(`Auth attempt with ${authEmail} failed, trying next...`);
-                }
-            }
-
-            // 3. Attempt Client Login (Database)
-            console.log("All admin auth attempts failed, trying client login...");
-
-            let clientDocs = await databases.listDocuments(DB_ID, COLLECTIONS.CLIENTS, [Query.equal('clientId', identifier)]);
-
-            if (clientDocs.total === 0) {
-                clientDocs = await databases.listDocuments(DB_ID, COLLECTIONS.CLIENTS, [Query.equal('name', identifier)]);
-            }
-
-            if (clientDocs.total > 0) {
-                const clientData = clientDocs.documents[0];
-                if (clientData.password === password) {
-                    localStorage.setItem('client_session', JSON.stringify(clientData));
-                    navigate('/client');
-                    return;
-                }
-            }
-
-            throw new Error('Invalid Credentials');
 
         } catch (error: any) {
             console.error("Login Error Details:", error);
+            let msg = 'Invalid Credentials';
+            if (error?.message?.includes('Rate limit')) {
+                msg = 'Too many attempts. Please wait a moment.';
+            } else if (error?.type === 'user_invalid_credentials') {
+                msg = 'Invalid username or password.';
+            }
+
             setNotification({
                 isOpen: true,
                 type: 'error',
-                title: 'Login Failed',
-                message: error.message || 'Invalid email/ID or password. Please try again.'
+                title: 'Login Failed', // Added title
+                message: msg
             });
         } finally {
             setIsLoading(false);
