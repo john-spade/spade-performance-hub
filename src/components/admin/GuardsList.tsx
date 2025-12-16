@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { databases, DB_ID, COLLECTIONS } from '../../lib/appwrite';
 import { ID, Query } from 'appwrite';
-import { Search, Plus, Trash2, Shield, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Trash2, Shield } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';

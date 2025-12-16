@@ -176,7 +176,7 @@ export default function EvaluationForm({ guardName, guardId, clientId, onSubmit 
 
             // 2. Submit Evaluation
             const totalPoints = calculateTotalPoints();
-            const recommendation = getRecommendation(totalPoints);
+
 
             const payload = {
                 clientId: clientId,

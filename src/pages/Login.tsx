@@ -1,17 +1,22 @@
 import React, { useState } from 'react';
-import { Card } from '../components/ui/Card';
-import { Input } from '../components/ui/Input';
-import { Button } from '../components/ui/Button';
-import { account, databases, DB_ID, COLLECTIONS } from '../lib/appwrite';
+import { useNavigate } from 'react-router-dom';
+import { Card } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
+import { account, databases, DB_ID, COLLECTIONS } from '@/lib/appwrite';
 import { Query } from 'appwrite';
-import { NotificationModal } from '../components/ui/NotificationModal';
+import { NotificationModal } from '@/components/ui/NotificationModal';
 import { Lock, User } from 'lucide-react';
 
-interface SignInProps {
-    onLoginSuccess: (role: 'admin' | 'client', data?: any) => void;
-}
+// Admin credentials
+const ADMIN_CREDENTIALS = {
+    username: 'admin-john',
+    password: '1234',
+    role: 'admin'
+};
 
-export default function SignIn({ onLoginSuccess }: SignInProps) {
+export default function Login() {
+    const navigate = useNavigate();
     const [identifier, setIdentifier] = useState('');
     const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -22,59 +27,52 @@ export default function SignIn({ onLoginSuccess }: SignInProps) {
         setIsLoading(true);
 
         try {
-            // 1. Attempt Admin Login (Appwrite Auth)
-            // Fully dynamic - any Appwrite Auth account can sign in with their email
-            // Also supports username shortcut for @spadesecurityservices.com accounts
-            const authAttempts: string[] = [];
             const trimmedIdentifier = identifier.trim();
+
+            // 1. Check hardcoded admin credentials first
+            if (trimmedIdentifier === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
+                localStorage.setItem('admin_session', JSON.stringify({
+                    username: ADMIN_CREDENTIALS.username,
+                    role: ADMIN_CREDENTIALS.role,
+                    loggedInAt: new Date().toISOString()
+                }));
+                navigate('/admin');
+                return;
+            }
+
+            // 2. Attempt Admin Login (Appwrite Auth)
+            const authAttempts: string[] = [];
             const isEmail = trimmedIdentifier.includes('@');
 
             if (isEmail) {
-                // If it's an email, try it directly (works for ANY email domain)
                 authAttempts.push(trimmedIdentifier);
             } else {
-                // If not an email, try common patterns:
-                // 1. First try with company domain (most common)
                 authAttempts.push(`${trimmedIdentifier.toLowerCase()}@spadesecurityservices.com`);
-                // 2. Try as-is in case it's somehow valid
                 authAttempts.push(trimmedIdentifier);
             }
 
             for (const authEmail of authAttempts) {
                 try {
-                    // Clear any existing stale session first
                     try {
                         await account.deleteSession('current');
                     } catch (e) {
-                        // Ignore - no session to delete
+                        // Ignore
                     }
 
                     console.log('Attempting admin login with:', authEmail);
                     await account.createEmailPasswordSession(authEmail, password);
-                    // If successful
-                    onLoginSuccess('admin');
+                    navigate('/admin');
                     return;
                 } catch (authError: any) {
-                    // Check if it's a rate limit error
                     if (authError?.code === 429 || authError?.message?.includes('429') || authError?.message?.includes('Too Many')) {
                         throw new Error('Too many login attempts. Please wait 5-10 minutes before trying again.');
                     }
-                    // Try next attempt
                     console.log(`Auth attempt with ${authEmail} failed, trying next...`);
                 }
             }
 
-            // If all admin attempts failed, continue to client login
+            // 3. Attempt Client Login (Database)
             console.log("All admin auth attempts failed, trying client login...");
-
-            // 2. Attempt Client Login (Database)
-            // Search by clientId OR name
-            const queries = [
-                Query.equal('clientId', identifier),
-            ];
-
-            // We can't do OR query directly easily across different fields in one go without permissions set up perfectly or complex queries
-            // So we'll try ID first, then Name if needed.
 
             let clientDocs = await databases.listDocuments(DB_ID, COLLECTIONS.CLIENTS, [Query.equal('clientId', identifier)]);
 
@@ -85,12 +83,12 @@ export default function SignIn({ onLoginSuccess }: SignInProps) {
             if (clientDocs.total > 0) {
                 const clientData = clientDocs.documents[0];
                 if (clientData.password === password) {
-                    onLoginSuccess('client', clientData);
+                    localStorage.setItem('client_session', JSON.stringify(clientData));
+                    navigate('/client');
                     return;
                 }
             }
 
-            // If we get here, neither worked
             throw new Error('Invalid Credentials');
 
         } catch (error: any) {
@@ -107,7 +105,7 @@ export default function SignIn({ onLoginSuccess }: SignInProps) {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+        <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden text-gray-100">
             <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_#1a2222_0%,_#0A0F0A_100%)] -z-10" />
 
             <Card className="w-full max-w-md p-8 border-gold-500/20 bg-dark-800/80 backdrop-blur-md">
@@ -120,12 +118,12 @@ export default function SignIn({ onLoginSuccess }: SignInProps) {
                 <form onSubmit={handleLogin} className="space-y-6">
                     <div>
                         <div className="relative">
-                            <User className="absolute left-3 top-3 w-5 h-5 text-gray-500" />
+                            <User className="absolute left-4 top-3 w-5 h-5 text-gray-500" />
                             <Input
-                                placeholder="Email, Client ID, or Company Name"
+                                placeholder="Username, Email, or Client ID"
                                 value={identifier}
                                 onChange={(e) => setIdentifier(e.target.value)}
-                                className="pl-10"
+                                className="pl-14 input-field"
                                 required
                             />
                         </div>
@@ -133,13 +131,13 @@ export default function SignIn({ onLoginSuccess }: SignInProps) {
 
                     <div>
                         <div className="relative">
-                            <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-500" />
+                            <Lock className="absolute left-4 top-3 w-5 h-5 text-gray-500" />
                             <Input
                                 type="password"
                                 placeholder="Password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="pl-10"
+                                className="pl-14 input-field"
                                 required
                             />
                         </div>

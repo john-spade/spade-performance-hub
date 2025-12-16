@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+
+import { useState } from 'react';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { Search } from 'lucide-react';
 import { Card } from '../ui/Card';
+
+
 import { databases, DB_ID, COLLECTIONS } from '../../lib/appwrite';
-import { Query } from 'appwrite';
+
 
 interface Guard {
     id: string;
